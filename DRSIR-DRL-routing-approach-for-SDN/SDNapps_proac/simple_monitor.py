@@ -19,6 +19,7 @@ import time
 import simple_awareness
 import simple_delay
 import manager
+import simple_qlen
 import json, ast
 import setting
 import csv
@@ -29,7 +30,8 @@ class simple_Monitor(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
     _CONTEXTS = {"simple_awareness": simple_awareness.simple_Awareness,
                   "simple_delay": simple_delay.simple_Delay,
-                  "manager": manager.Manager}
+                  "manager": manager.Manager,
+                  "qlen": simple_qlen.simple_qlen}
 
     def __init__(self, *args, **kwargs):
         super(simple_Monitor, self).__init__(*args, **kwargs)
@@ -54,6 +56,7 @@ class simple_Monitor(app_manager.RyuApp):
         self.awareness = kwargs["simple_awareness"]
         self.delay = kwargs["simple_delay"]
         self.manager = kwargs["manager"]
+        self.qlen = kwargs["qlen"]
         self.paths = {}
         self.time_path = []
         self.installed_paths = {}
@@ -86,39 +89,39 @@ class simple_Monitor(app_manager.RyuApp):
             Main entry method of monitoring traffic.
         """
         while True:
-            self.count_monitor += 1
-            self.stats['flow'] = {}
-            self.stats['port'] = {}
-            print("[Statistics Module Ok]")
-            print("[{0}]".format(self.count_monitor))
-            for dp in self.datapaths.values():
-                self.port_features.setdefault(dp.id, {}) #setdefault() returns the value of the item with the specified key
-                self.paths = None
-                self.request_stats(dp)
+            try:
+                self.count_monitor += 1
+                self.stats['flow'] = {}
+                self.stats['port'] = {}
+                print("[Statistics Module Ok]")
+                print("[{0}]".format(self.count_monitor))
+                for dp in self.datapaths.values():
+                    self.port_features.setdefault(dp.id, {}) #setdefault() returns the value of the item with the specified key
+                    self.paths = None
+                    self.request_stats(dp)
 
-            if self.awareness.link_to_port:
-                self.flow_install_monitor()
+                if self.awareness.link_to_port:
+                    self.flow_install_monitor()
 
-            if self.stats['port']:
-                print("[stats port Ok]")
-                try:
+                if self.stats['port']:
+                    print("[stats port Ok]")
                     self.manager.get_port_loss()
                     self.manager.get_link_free_bw()
                     self.manager.get_link_used_bw()
+                    self.manager.get_qlen()
                     self.manager.write_values()
-                except:
-                    print("Algo fallo en manager")
-                    raise
-                # print('awareness SHORTEST PATHS',self.shortest_paths)
-                # print(self.manager.link_free_bw, self.delay.link_delay, self.manager.link_loss)
+                    # print('awareness SHORTEST PATHS',self.shortest_paths)
+                    # print(self.manager.link_free_bw, self.delay.link_delay, self.manager.link_loss)
 
-                if self.manager.link_free_bw and self.shortest_paths:
-                    # print("[paths metrics Ok]")
-                    self.manager.get_k_paths_metrics_dic(self.shortest_paths,self.manager.link_free_bw, self.delay.link_delay, self.manager.link_loss)
+                    if self.manager.link_free_bw and self.shortest_paths:
+                        # print("[paths metrics Ok]")
+                        self.manager.get_k_paths_metrics_dic(self.shortest_paths,self.manager.link_free_bw, self.delay.link_delay, self.manager.link_loss)
 
-                self.show_stat('link')
-            else:
-                print("Not stats")
+                    self.show_stat('qlen')
+                else:
+                    print("Not stats")
+            except Exception as e:
+                print("Algo paso en monitro {}".format(e.__class__))
 
             hub.sleep(setting.MONITOR_PERIOD)
             # if self.stats['port']: #muestra stats cada 1s
@@ -359,6 +362,7 @@ class simple_Monitor(app_manager.RyuApp):
         else:
             self.logger.info("Link from dpid:%s to dpid:%s is not in links" %
              (src_dpid, dst_dpid))
+            raise
             return None
 
     def get_path(self, src, dst):
@@ -888,5 +892,24 @@ class simple_Monitor(app_manager.RyuApp):
                         self.manager.link_used_bw[link]/1000.0,
                         values[0], values[1], values[2]))
 
+        if _type == 'qlen':
+
+            print('\nnode1  node2  used-bw(Kb/s)   free-bw(Kb/s)    latency(ms)     loss      qlen->     <-qlen')
+            print('-----  -----  --------------   --------------   -----------    ----      ------      ------ ')
+            # print('\nnode1  node2  total-bw(Kb/s)  used-bw(Kb/s)    free-bw(Kb/s)   latency     loss')
+            # print('-----  -----  --------------  ---------------  --------------  ----------  ---- ')
+
+            format_ = '{:>5}  {:>5} {:>14.5f}  {:>14.5f}  {:>12}  {:>12}  {:>5}  {:>5}'
+            # format_ = '{:>5}  {:>5}  {:>13.5f}  {:>14.5f}  {:>14.5f}  {:>10}  {:>4}'
+
+            links_in = []
+            
+            for link, values in sorted(self.manager.net_info_qlen.items()):
+                links_in.append(link)
+                tup = (link[1], link[0])
+                if tup not in links_in:
+                    print(format_.format(link[0],link[1],
+                        self.manager.link_used_bw[link]/1000.0,
+                        values[0], values[1], values[2], values[3], values[4]))
 
             # print()_

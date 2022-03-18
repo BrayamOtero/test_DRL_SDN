@@ -23,6 +23,7 @@ import time
 import simple_awareness
 import simple_delay
 import simple_monitor
+import simple_qlen
 import json, ast
 import setting
 import csv
@@ -42,10 +43,12 @@ class Manager(app_manager.RyuApp):
         self.awareness = lookup_service_brick("awareness")
         self.delay = lookup_service_brick("delay")
         self.monitor = lookup_service_brick("monitor")
+        self.monitorQlen = lookup_service_brick("qlen")
         # self.delay = kwargs["simple_delay"]
 
         self.link_loss = {}
         self.net_info = {}
+        self.net_info_qlen = {}
         self.net_metrics= {}
         self.link_free_bw = {}
         self.link_used_bw = {}
@@ -53,6 +56,9 @@ class Manager(app_manager.RyuApp):
         # self.bwd_paths = {}
         # self.delay_paths = {}
         # self.loss_paths = {}
+
+        #Ocupacion de cola
+        self.sw_qlen = {}
 
 
     # def get_flow_loss(self):
@@ -135,6 +141,7 @@ class Manager(app_manager.RyuApp):
             for port in self.monitor.free_bandwidth[dp]:
                 free_bw1 = self.monitor.free_bandwidth[dp][port]
                 key2 = self.monitor.get_sw_dst(dp, port) #key2 = (dp,port)
+                # print("dp es: {} y port es: {}".format(dp, port))
                 free_bw2= self.monitor.free_bandwidth[key2[0]][key2[1]]
                 link_free_bw = min(free_bw1,free_bw2) #para DRL estoy cambiando cual es el bw del link... es el min de ambos, el peor de los caso, no el promedio
                 link = (dp, key2[0])
@@ -158,6 +165,28 @@ class Manager(app_manager.RyuApp):
         # print(self.link_free_bw)
         # print('Time to get link_used_bw', time.time()-i)
 
+    # ocupacion de cola
+
+    def get_qlen(self):
+        #obtener
+        self.sw_qlen = {}
+        # print("qlen: ")
+        try:
+            info_qlen = self.monitorQlen.qlen
+        except:
+            self.monitorQlen = lookup_service_brick('qlen')
+            info_qlen = self.monitorQlen.qlen
+        # print(info_qlen)
+        for dp, info in self.monitorQlen.qlen.items():
+            for port in info:
+                try:
+                    port_dst = self.monitor.get_sw_dst(int(dp), int(port['portid']))
+                    link = (int(dp), port_dst[0])
+                    # print(link)
+                    self.sw_qlen[link] =  int(port['qlen'])
+                except Exception as e:
+                    print("No se encontro el puerto destino de dp: {} y port {}".format(dp, port['portid']))
+
     def write_values(self):
         print("write_values")
         a = time.time()
@@ -174,6 +203,8 @@ class Manager(app_manager.RyuApp):
             for link in self.link_free_bw:
                 # print('loss_links', self.link_loss)
                 self.net_info[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6)]
+                link_rev = (link[1], link[0])
+                self.net_info_qlen[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6), self.sw_qlen[link], self.sw_qlen[link_rev]]
                 self.net_metrics[link] = [round(self.link_free_bw[link],6), round(self.link_used_bw[link],6), round(self.delay.link_delay[link],6), round(self.link_loss[link],6)]
 
             # print(self.net_info[(1, 7)])
@@ -271,6 +302,14 @@ class Manager(app_manager.RyuApp):
         loss_path = 1.0 - result_multi
         return round(loss_path*100.0,6)
 
+    def calc_qlen_path(self,qlen_links_path):
+        '''
+        path = [link1, link2, link3]
+        path_qlen = sum(qlen of all "links" pero en realidad es del la cola del puerto emisor)
+        '''
+        qlen_path = sum(qlen_links_path)
+        return round(qlen_path,6)
+
     def metrics_links_kpaths(self,k_paths,bwd_links,delay_links,loss_links):
         # print("metrics_links_kpaths")
         '''
@@ -282,22 +321,33 @@ class Manager(app_manager.RyuApp):
         delay_paths_nodes = []
         loss_paths_nodes = []
 
+        qlen_paths_nodes = []
+        # print(self.sw_qlen)
+
+
         # print('------****',src,dst)
         for path in k_paths:
             # print('------',src,dst,path)
             bwd_links_path = []
             delay_links_path = []
             loss_links_path = []
+            qlen_links_path = []
             for i in range(len(path)-1):
                 link_ = (path[i],path[i+1])
 
                 bwd = round(bwd_links[link_],6)
                 delay = round(delay_links[link_],6)
                 loss = round(loss_links[link_],6)
+                try:
+                    qlen = self.sw_qlen[link_]
+                except:
+                    print("no encontro el qlen de {}".format(link_))
+                    qlen = 0
 
                 bwd_links_path.append(bwd)
                 delay_links_path.append(delay)
                 loss_links_path.append(loss)
+                qlen_links_path.append(qlen)
 
             bwd_path = self.calc_bwd_path(bwd_links_path)
             bwd_paths_nodes.append(bwd_path)
@@ -308,11 +358,13 @@ class Manager(app_manager.RyuApp):
             loss_path = self.calc_loss_path(loss_links_path)
             loss_paths_nodes.append(loss_path)
 
+            qlen_path = self.calc_qlen_path(qlen_links_path)
+            qlen_paths_nodes.append(qlen_path)
         # bwd_paths[src][dst] = bwd_paths_nodes
         # delay_paths[src][dst] = delay_paths_nodes
         # loss_paths[src][dst] = loss_paths_nodes
 
-        return bwd_paths_nodes,delay_paths_nodes,loss_paths_nodes
+        return bwd_paths_nodes,delay_paths_nodes,loss_paths_nodes, qlen_paths_nodes
 
     def get_k_paths_metrics_dic(self,shortest_paths,bwd_links,delay_links,loss_links):
         print("get_k_paths_metrics_dic")
@@ -322,7 +374,7 @@ class Manager(app_manager.RyuApp):
         '''
         i = time.time()
         # print('Entra paths metrics')
-        metrics = ['bwd_paths','delay_paths','loss_paths']
+        metrics = ['bwd_paths','delay_paths','loss_paths', 'qlen_paths']
         # print('------switches',self.awareness.switches)
         for sw in shortest_paths.keys():
             self.paths_metrics.setdefault(sw,{})
@@ -338,11 +390,12 @@ class Manager(app_manager.RyuApp):
             for dst in shortest_paths[src].keys():
                 if src != dst:
                     k_paths = self.get_k_paths_nodes(shortest_paths,src,dst)
-                    bwd_paths_nodes, delay_paths_nodes, loss_paths_nodes = self.metrics_links_kpaths(k_paths,bwd_links,delay_links,loss_links)
+                    bwd_paths_nodes, delay_paths_nodes, loss_paths_nodes, qlen_paths_nodes = self.metrics_links_kpaths(k_paths,bwd_links,delay_links,loss_links)
                     # print('---',src,dst,bwd_paths_nodes, delay_paths_nodes, loss_paths_nodes)
                     self.paths_metrics[src][dst][metrics[0]] = [bwd_paths_nodes]
                     self.paths_metrics[src][dst][metrics[1]] = [delay_paths_nodes]
                     self.paths_metrics[src][dst][metrics[2]] = [loss_paths_nodes]
+                    self.paths_metrics[src][dst][metrics[3]] = [qlen_paths_nodes]
         # print('paths_metrics',self.paths_metrics)
         print('writing paths_metrics')
 

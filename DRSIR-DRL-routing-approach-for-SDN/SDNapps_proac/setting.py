@@ -6,6 +6,8 @@ DELAY_DETECTING_PERIOD = 8 #8
 
 TOSHOW = True	   # For showing information in terminal
 
+URL_MONITOR_QLEN = "http://192.168.56.11:8089/"
+
 
 '''
 para 64 nodos intente correr con discover 10, monitor 15, delay 13  pero cuparece que el monitor no es suficiente para el drl, si toca aumenta rmuco pues paila, entones savoy a ahcer con 48nodos
