@@ -41,7 +41,6 @@ class simple_Monitor(app_manager.RyuApp):
         self.datapaths = {}
         self.port_stats = {}
         self.port_speed = {}
-        self.flow_stats = {}
         self.flow_speed = {}
         self.flow_loss = {}
         self.port_loss = {}
@@ -63,6 +62,10 @@ class simple_Monitor(app_manager.RyuApp):
         self.shortest_paths = self.get_k_paths()
         # print(self.shortest_paths)
         self.values_reward = {}
+
+        # Sacar la matriz de trafico
+        self.flow_stats = {}
+        self.bw_TM = {} # matrix de trafico {(dp_src, dp_dst): througth}
         self.monitor_thread = hub.spawn(self.monitor)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
@@ -116,12 +119,13 @@ class simple_Monitor(app_manager.RyuApp):
                     if self.manager.link_free_bw and self.shortest_paths:
                         # print("[paths metrics Ok]")
                         self.manager.get_k_paths_metrics_dic(self.shortest_paths,self.manager.link_free_bw, self.delay.link_delay, self.manager.link_loss)
+                        self.manager.get_TM(self.bw_TM)
 
                     self.show_stat('qlen')
                 else:
                     print("Not stats")
             except Exception as e:
-                print("Algo paso en monitro {}".format(e.__class__))
+                print("Algo paso en monitro {}".format(e))
 
             hub.sleep(setting.MONITOR_PERIOD)
             # if self.stats['port']: #muestra stats cada 1s
@@ -193,15 +197,15 @@ class simple_Monitor(app_manager.RyuApp):
         return k_shortest_paths
 
     def request_stats(self, datapath): #OK
-        self.logger.debug('send stats request: %016x', datapath.id)
+        # self.logger.debug('send stats request: %016x', datapath.id)
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
         req = parser.OFPPortDescStatsRequest(datapath, 0) #for port description
         datapath.send_msg(req)
 
-        # req = parser.OFPFlowStatsRequest(datapath) #individual flow statistics
-        # datapath.send_msg(req)
+        req = parser.OFPFlowStatsRequest(datapath) #individual flow statistics
+        datapath.send_msg(req)
 
         req = parser.OFPPortStatsRequest(datapath, 0, ofproto.OFPP_ANY)
         datapath.send_msg(req)
@@ -652,7 +656,7 @@ class simple_Monitor(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def port_stats_reply_handler(self, ev):
-        print("port_stats_reply_handler")
+        # print("port_stats_reply_handler")
         a = time.time()
         body = ev.msg.body
         dpid = ev.msg.datapath.id
@@ -903,7 +907,7 @@ class simple_Monitor(app_manager.RyuApp):
             # format_ = '{:>5}  {:>5}  {:>13.5f}  {:>14.5f}  {:>14.5f}  {:>10}  {:>4}'
 
             links_in = []
-            
+
             for link, values in sorted(self.manager.net_info_qlen.items()):
                 links_in.append(link)
                 tup = (link[1], link[0])
@@ -913,3 +917,27 @@ class simple_Monitor(app_manager.RyuApp):
                         values[0], values[1], values[2], values[3], values[4]))
 
             # print()_
+
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def _flow_stats_reply_handler(self, ev):
+        body = ev.msg.body
+        for stat in sorted([flow for flow in body if flow.priority == 1],
+                           key=lambda flow: (flow.match.get('ipv4_src'),
+                                             flow.match.get('ipv4_dst'))):
+            dp = ev.msg.datapath.id
+            dp_dst = int(stat.match['ipv4_dst'][-2:].replace(".", ""))
+            if dp == int(stat.match['ipv4_src'][-2:].replace(".", "")):
+                key = (dp, dp_dst)
+                value = (stat.byte_count, time.time(), stat.duration_nsec)
+                self.save_stats(self.flow_stats, key, value, 5)
+
+                pre = 0
+                period = 5
+                tmp = self.flow_stats[key]
+                if len(tmp) > 1:
+                    pre = tmp[-2][0] #penultimo flow byte_count
+                    period = tmp[-1][1] - tmp[-2][1]
+
+                speed = self.get_speed(self.flow_stats[key][-1][0], #ultimo flow byte_count, penultimo byte_count, periodo
+                                        pre, period)
+                self.bw_TM[key] = round(speed/1000,2)

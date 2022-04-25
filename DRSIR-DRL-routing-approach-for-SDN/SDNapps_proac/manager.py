@@ -89,7 +89,7 @@ class Manager(app_manager.RyuApp):
     # ----------------------Link metrics -------------------------
 
     def get_port_loss(self):
-        print("getLoss")
+        # print("getLoss")
         #Get loss_port
         i = time.time()
         try:
@@ -134,7 +134,7 @@ class Manager(app_manager.RyuApp):
         # print('Time get_port_loss', time.time()-i)
 
     def get_link_free_bw(self):
-        print("et_link_free_bw")
+        # print("et_link_free_bw")
         #Calculates the total free bw of link and save it in self.link_free_bw[(node1,node2)]:link_free_bw
         i = time.time()
         for dp in self.monitor.free_bandwidth.keys():
@@ -152,7 +152,7 @@ class Manager(app_manager.RyuApp):
         # print('Time to get link_free_bw', time.time()-i)
 
     def get_link_used_bw(self):
-        print("get_link_used_bw")
+        # print("get_link_used_bw")
         #Calculates the total free bw of link and save it in self.link_free_bw[(node1,node2)]:link_free_bw
         i = time.time()
         for key in self.monitor.port_speed.keys():
@@ -404,8 +404,36 @@ class Manager(app_manager.RyuApp):
 
         print('------****metrics k_paths', time.time()-i)
 
+    def get_TM(self, bw_TM):
+        """
+            Metodo para tranformar la info de las matices de trafico recogida en monitor en un archivo json
+            Estas matrices de trafico estan dadas en Mbits/s, la estructura de datos es:
+            {(src,dst) : Mbits/s, (src,dst) : Mbits/s ...}
+        """
+        # print(type(bw_TM))
+        #Tenemos tuplas en el key del dict, pero para tranformar lo a json, no se permite este tipo de dato en el key
+        #por lo tanto, hay que tranformar la tupla ha lo siguiente:
+        # {src:{dst1:Mbits/s, dst2:Mbits/s, ...}, src2:{dst1:Mbits/s, dst2:Mbits/s, ...}}
+
+        with open('/home/brayam/Tesis/Daniela/DRSIR-DRL-routing-approach-for-SDN/SDNapps_proac/TM.json','w') as json_file:
+            json.dump(self.tupleToStandar(bw_TM), json_file)
+
+
+    def tupleToStandar(self, dict_tm):
+        dict_new = {}
+        for src_dst, bw in dict_tm.items():
+            src = src_dst[0]
+            dst = src_dst[1]
+            if src not in dict_new.keys():
+                dict_new.setdefault(src, {})
+
+            dict_new[src][dst] = bw
+
+        return dict_new
+
+
     def get_k_paths_metrics(self,shortest_paths,bwd_links,delay_links,loss_links):
-        print("get_k_paths_metrics")
+        # print("get_k_paths_metrics")
         ''' escribe las metricas en un diccionario por separado
             bwd_paths [src][dst]:[bwd1,bwd1,bwd3...,bwdk]'''
         for sw in self.awareness.switches:

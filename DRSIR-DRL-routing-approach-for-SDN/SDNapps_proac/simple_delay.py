@@ -61,8 +61,11 @@ class simple_Delay(app_manager.RyuApp):
             Send echo request and calculate link delay periodically
         """
         while True:
-            self._send_echo_request()
-            self.create_link_delay()
+            try:
+                self._send_echo_request()
+                self.create_link_delay()
+            except:
+                print("error in delay ")
             # try:
             #     self.awareness.shortest_paths = {}
             #     self.logger.debug("Refresh the shortest_paths")
