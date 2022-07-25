@@ -202,14 +202,14 @@ class Manager(app_manager.RyuApp):
         if self.delay is not None:
             for link in self.link_free_bw:
                 # print('loss_links', self.link_loss)
-                self.net_info[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6)]
                 link_rev = (link[1], link[0])
+                self.net_info[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6), self.sw_qlen[link], self.sw_qlen[link_rev]]                
                 self.net_info_qlen[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6), self.sw_qlen[link], self.sw_qlen[link_rev]]
                 self.net_metrics[link] = [round(self.link_free_bw[link],6), round(self.link_used_bw[link],6), round(self.delay.link_delay[link],6), round(self.link_loss[link],6)]
 
             # print(self.net_info[(1, 7)])
             with open('/home/brayam/Tesis/Daniela/DRSIR-DRL-routing-approach-for-SDN/SDNapps_proac/net_info.csv','w') as csvfile:
-                header_names = ['node1','node2','bwd','delay','pkloss']
+                header_names = ['node1','node2','bwd','delay','pkloss', 'qlen->', '<-qlen']
                 file = csv.writer(csvfile, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)
                 links_in = []
                 file.writerow(header_names)
@@ -217,7 +217,7 @@ class Manager(app_manager.RyuApp):
                     links_in.append(link)
                     tup = (link[1], link[0])
                     if tup not in links_in:
-                        file.writerow([link[0],link[1], values[0],values[1],values[2]])
+                        file.writerow([link[0],link[1], values[0],values[1],values[2], values[3],  values[4]])
 
             file_metrics = '/home/brayam/Tesis/Daniela/DRSIR-DRL-routing-approach-for-SDN/SDNapps_proac/Metrics/'+str(self.monitor.count_monitor)+'_net_metrics.csv'
             with open(file_metrics,'w') as csvfile:
