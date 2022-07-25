@@ -129,7 +129,7 @@ class simple_Delay(app_manager.RyuApp):
             delay = (fwd_delay + re_delay - src_latency - dst_latency)/2
             return max(delay, 0)
         except:
-            return float(0)
+            return float(9999)
 
     def _save_lldp_delay(self, src=0, dst=0, lldpdelay=0):
         try:
